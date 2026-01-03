@@ -1,0 +1,63 @@
+monitor-agent/
+├── main.go                 # 入口文件
+├── types.go               # 数据结构定义
+├── collector_cpu.go       # CPU采集器
+├── collector_memory.go    # 内存采集器
+├── collector_disk.go      # 磁盘采集器
+├── collector_network.go   # 网络采集器
+├── config.go             # 配置管理（待开发）
+├── reporter.go           # 数据上报（待开发）
+└── go.mod                # 依赖管理
+
+// ============================================
+// go.mod - 依赖管理
+// ============================================
+/*
+module monitor-agent
+
+go 1.21
+
+require (
+    github.com/shirou/gopsutil/v3 v3.23.12
+)
+*/
+
+go run .
+
+1. 复制proto文件
+将monitor-backend/proto/collector.proto 复制到 monitor-agent/proto/
+
+2. 生成protobuf代码
+cd monitor-agent
+mkdir -p proto
+protoc --go_out=. --go_opt=paths=source_relative \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    proto/collector.proto
+
+3. 安装依赖
+go get google.golang.org/grpc
+go get google.golang.org/protobuf
+go get gopkg.in/yaml.v3
+
+4. 创建配置文件 agent-config.yaml
+server_addr: "localhost:50051"
+host_id: "server-001"
+collect_interval: 10
+debug: false
+
+5. 运行Agent
+# 使用配置文件
+go run .
+
+# 使用命令行参数
+go run . -server localhost:50051 -host-id server-001 -interval 10
+
+# 调试模式（只输出到控制台）
+go run . -debug
+
+6. 编译
+go build -o monitor-agent
+
+7. 部署
+./monitor-agent -server prod-server:50051 -host-id prod-001
+*/
