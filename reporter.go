@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"os"
 	"runtime"
 	"time"
@@ -59,7 +60,8 @@ func NewReporter(serverAddr, hostID string) (*Reporter, error) {
 // register 注册Agent
 func (r *Reporter) register() error {
 	hostname, _ := os.Hostname()
-	ip := getLocalIP()
+	// 读取配置
+	ip := r.getIPAddress()
 
 	req := &pb.RegisterRequest{
 		HostId:   r.hostID,
@@ -202,6 +204,147 @@ func (r *Reporter) SendHeartbeat() error {
 	return nil
 }
 
+// ReportProcesses 上报进程监控数据
+func (r *Reporter) ReportProcesses(data *ProcessMetrics) error {
+	if !r.registered {
+		log.Printf("Reporter not registered, skipping process report")
+		return nil
+	}
+
+	if data == nil || len(data.Processes) == 0 {
+		log.Printf("No process data to report")
+		return nil
+	}
+
+	req := &pb.ProcessReportRequest{
+		HostId:    r.hostID,
+		Timestamp: time.Now().Unix(),
+		Processes: make([]*pb.ProcessInfo, 0, len(data.Processes)),
+	}
+
+	for _, p := range data.Processes {
+		req.Processes = append(req.Processes, &pb.ProcessInfo{
+			Pid:          p.PID,
+			Name:         p.Name,
+			User:         p.User,
+			CpuPercent:   p.CPUPercent,
+			MemoryPercent: p.MemoryPercent,
+			MemoryBytes:  p.MemoryBytes,
+			CreateTime:   p.CreateTime,
+			Status:       p.Status,
+			Command:      p.Command,
+		})
+	}
+
+	log.Printf("Sending %d processes to server", len(req.Processes))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := r.client.ReportProcesses(ctx, req)
+	if err != nil {
+		log.Printf("Failed to send process data: %v", err)
+		return err
+	}
+
+	if resp != nil && resp.Success {
+		log.Printf("Process data reported successfully: %s", resp.Message)
+	} else {
+		log.Printf("Server response: success=%v, message=%s", resp != nil && resp.Success, resp.GetMessage())
+	}
+
+	return nil
+}
+
+// ReportLogs 上报日志数据
+func (r *Reporter) ReportLogs(data *LogMetrics) error {
+	if !r.registered {
+		return nil
+	}
+
+	req := &pb.LogReportRequest{
+		HostId:    r.hostID,
+		Timestamp: time.Now().Unix(),
+		Logs:      make([]*pb.LogEntry, 0),
+	}
+
+	for _, log := range data.Entries {
+		req.Logs = append(req.Logs, &pb.LogEntry{
+			Source:    log.Source,
+			Level:     log.Level,
+			Message:   log.Message,
+			Timestamp: log.Timestamp,
+			Tags:      log.Tags,
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := r.client.ReportLogs(ctx, req)
+	return err
+}
+
+// ReportScriptResults 上报脚本执行结果
+func (r *Reporter) ReportScriptResults(data *ScriptMetrics) error {
+	if !r.registered {
+		return nil
+	}
+
+	for _, result := range data.Results {
+		req := &pb.ScriptResultRequest{
+			HostId:     r.hostID,
+			ScriptId:    result.ScriptID,
+			ScriptName: result.ScriptName,
+			Timestamp:  result.Timestamp,
+			Success:    result.Success,
+			Output:     result.Output,
+			Error:      result.Error,
+			ExitCode:   int32(result.ExitCode),
+			DurationMs: result.Duration,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := r.client.ReportScriptResult(ctx, req)
+		cancel()
+
+		if err != nil {
+			log.Printf("Failed to report script result %s: %v", result.ScriptID, err)
+		}
+	}
+
+	return nil
+}
+
+// ReportServiceStatus 上报服务状态
+func (r *Reporter) ReportServiceStatus(data *ServiceMetrics) error {
+	if !r.registered {
+		return nil
+	}
+
+	req := &pb.ServiceStatusRequest{
+		HostId:    r.hostID,
+		Timestamp: time.Now().Unix(),
+		Services:  make([]*pb.ServiceInfo, 0),
+	}
+
+	for _, s := range data.Services {
+		req.Services = append(req.Services, &pb.ServiceInfo{
+			Name:         s.Name,
+			Status:       s.Status,
+			Enabled:      s.Enabled,
+			Description:  s.Description,
+			UptimeSeconds: s.Uptime,
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := r.client.ReportServiceStatus(ctx, req)
+	return err
+}
+
 // Close 关闭连接
 func (r *Reporter) Close() {
 	if r.conn != nil {
@@ -209,8 +352,44 @@ func (r *Reporter) Close() {
 	}
 }
 
-// getLocalIP 获取本机IP
+// getLocalIP 获取本机真实IP
 func getLocalIP() string {
-	// 简化实现，实际应该获取真实IP
-	return "127.0.0.1"
+	// 方法1：通过连接外部地址获取（最准确）
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		log.Printf("Failed to get IP by dial: %v", err)
+
+		// 方法2：遍历网络接口
+		addrs, err := net.InterfaceAddrs()
+		if err != nil {
+			return "127.0.0.1"
+		}
+
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+				if ipNet.IP.To4() != nil {
+					return ipNet.IP.String()
+				}
+			}
+		}
+
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
+
+func (r *Reporter) getIPAddress() string {
+	config := LoadAgentConfig()
+
+	if config.ManualIP != "" {
+		log.Printf("Using manual IP from config: %s", config.ManualIP)
+		return config.ManualIP
+	}
+
+	ip := getLocalIP()
+	log.Printf("Auto-detected IP: %s", ip)
+	return ip
 }

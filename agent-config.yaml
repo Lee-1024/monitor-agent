@@ -1,0 +1,5 @@
+server_addr: "localhost:50051"
+host_id: "server-001"
+collect_interval: 10
+manual_ip: "192.168.21.14"  # 手动指定IP
+debug: false

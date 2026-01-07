@@ -19,16 +19,65 @@ type Agent struct {
 }
 
 func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent {
+	config := LoadAgentConfig()
+	
+	// 基础收集器
+	collectors := []Collector{
+		&CPUCollector{},
+		&MemoryCollector{},
+		&DiskCollector{},
+		&NetworkCollector{},
+	}
+	
+	// 进程监控收集器
+	processCollector := NewProcessCollector(50) // 最多收集50个进程
+	collectors = append(collectors, processCollector)
+	
+	// 日志收集器（从配置读取日志路径）
+	logPaths := []string{
+		"/var/log/syslog",
+		"/var/log/messages",
+		"/var/log/nginx/access.log",
+		"/var/log/nginx/error.log",
+	}
+	if len(config.LogPaths) > 0 {
+		logPaths = config.LogPaths
+		log.Printf("Loaded %d log paths from config", len(logPaths))
+	} else {
+		log.Printf("Using default log paths")
+	}
+	logCollector := NewLogCollector(logPaths, 100) // 每个文件最多100行
+	collectors = append(collectors, logCollector)
+	
+	// 脚本执行器（从配置读取脚本列表）
+	if len(config.Scripts) > 0 {
+		log.Printf("Loaded %d scripts from config", len(config.Scripts))
+		scriptExecutor := NewScriptExecutor(config.Scripts)
+		collectors = append(collectors, scriptExecutor)
+	} else {
+		log.Printf("No scripts configured")
+	}
+	
+	// 服务状态检测器（从配置读取服务列表）
+	services := []string{
+		"sshd",
+		"docker",
+		"nginx",
+	}
+	if len(config.Services) > 0 {
+		services = config.Services
+		log.Printf("Loaded %d services from config", len(services))
+	} else {
+		log.Printf("Using default services")
+	}
+	serviceCollector := NewServiceCollector(services)
+	collectors = append(collectors, serviceCollector)
+	
 	return &Agent{
 		HostID:          hostID,
 		CollectInterval: interval,
 		reporter:        reporter,
-		collectors: []Collector{
-			&CPUCollector{},
-			&MemoryCollector{},
-			&DiskCollector{},
-			&NetworkCollector{},
-		},
+		collectors:      collectors,
 	}
 }
 
@@ -47,6 +96,8 @@ func (a *Agent) Start() {
 		case <-ticker.C:
 			metrics := a.collectMetrics()
 			a.reportMetrics(metrics)
+			// 上报额外的监控数据（进程、日志、脚本、服务）
+			a.reportAdditionalMetrics(metrics)
 		case <-heartbeatTicker.C:
 			if a.reporter != nil {
 				a.reporter.SendHeartbeat()
@@ -86,6 +137,46 @@ func (a *Agent) reportMetrics(data *MetricsData) {
 		// 否则输出到控制台（调试模式）
 		jsonData, _ := json.MarshalIndent(data, "", "  ")
 		fmt.Printf("\n=== Metrics Report ===\n%s\n", string(jsonData))
+	}
+}
+
+// reportAdditionalMetrics 上报额外的监控数据（进程、日志、脚本、服务）
+func (a *Agent) reportAdditionalMetrics(metrics *MetricsData) {
+	if a.reporter == nil {
+		return
+	}
+
+	// 上报进程数据
+	if processData, ok := metrics.Metrics["process"].(*ProcessMetrics); ok {
+		log.Printf("Reporting %d processes to server", len(processData.Processes))
+		if err := a.reporter.ReportProcesses(processData); err != nil {
+			log.Printf("Failed to report processes: %v", err)
+		} else {
+			log.Printf("Successfully reported %d processes", len(processData.Processes))
+		}
+	} else {
+		log.Printf("No process data found in metrics (type: %T, value: %v)", metrics.Metrics["process"], metrics.Metrics["process"])
+	}
+	
+	// 上报日志数据
+	if logData, ok := metrics.Metrics["log"].(*LogMetrics); ok {
+		if err := a.reporter.ReportLogs(logData); err != nil {
+			log.Printf("Failed to report logs: %v", err)
+		}
+	}
+	
+	// 上报脚本执行结果
+	if scriptData, ok := metrics.Metrics["script"].(*ScriptMetrics); ok {
+		if err := a.reporter.ReportScriptResults(scriptData); err != nil {
+			log.Printf("Failed to report script results: %v", err)
+		}
+	}
+	
+	// 上报服务状态
+	if serviceData, ok := metrics.Metrics["service"].(*ServiceMetrics); ok {
+		if err := a.reporter.ReportServiceStatus(serviceData); err != nil {
+			log.Printf("Failed to report service status: %v", err)
+		}
 	}
 }
 

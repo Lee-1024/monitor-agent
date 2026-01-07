@@ -1,0 +1,147 @@
+# ============================================
+# Agent配置文件示例
+# ============================================
+
+# 服务器地址（gRPC）
+server_addr: "localhost:50051"
+
+# 主机ID（唯一标识）
+host_id: "server-001"
+
+# 采集间隔（秒）
+collect_interval: 10
+
+# 手动指定IP（可选，如果不指定则自动检测）
+manual_ip: "192.168.21.14"
+
+# 调试模式（true: 输出到控制台, false: 通过gRPC上报）
+debug: false
+
+# ============================================
+# 日志收集配置
+# ============================================
+log_paths:
+  # Linux系统日志
+  - "/var/log/syslog"
+  - "/var/log/messages"
+  - "/var/log/kern.log"
+  
+  # 应用日志
+  - "/var/log/nginx/access.log"
+  - "/var/log/nginx/error.log"
+  - "/var/log/apache2/access.log"
+  - "/var/log/apache2/error.log"
+  
+  # 服务日志
+  - "/var/log/mysql/error.log"
+  - "/var/log/postgresql/postgresql.log"
+  - "/var/log/docker.log"
+  
+  # 自定义应用日志
+  - "/opt/myapp/logs/app.log"
+  - "/opt/myapp/logs/error.log"
+  
+  # Windows系统日志（Windows系统）
+  # - "C:\\Windows\\System32\\LogFiles\\W3SVC1\\*.log"
+  # - "C:\\Program Files\\MyApp\\logs\\*.log"
+
+# ============================================
+# 自定义脚本执行配置
+# ============================================
+scripts:
+  # 示例1: 执行系统命令
+  - id: "disk-check"
+    name: "磁盘空间检查"
+    command: "df"
+    args:
+      - "-h"
+    timeout: 10        # 超时时间（秒）
+    interval: 300      # 执行间隔（秒），300秒=5分钟
+
+  # 示例2: 执行Shell脚本
+  - id: "system-info"
+    name: "系统信息收集"
+    command: "/opt/scripts/system-info.sh"
+    args: []
+    timeout: 30
+    interval: 600      # 10分钟执行一次
+
+  # 示例3: 执行Python脚本
+  - id: "health-check"
+    name: "健康检查脚本"
+    command: "python3"
+    args:
+      - "/opt/scripts/health_check.py"
+      - "--verbose"
+    timeout: 60
+    interval: 120      # 2分钟执行一次
+
+  # 示例4: 执行带参数的Shell命令
+  - id: "network-test"
+    name: "网络连通性测试"
+    command: "ping"
+    args:
+      - "-c"
+      - "5"
+      - "8.8.8.8"
+    timeout: 15
+    interval: 300
+
+  # 示例5: 执行数据库查询脚本
+  - id: "db-backup-check"
+    name: "数据库备份检查"
+    command: "/opt/scripts/check_backup.sh"
+    args:
+      - "--db"
+      - "mysql"
+    timeout: 120
+    interval: 3600     # 1小时执行一次
+
+  # 示例6: 执行监控脚本
+  - id: "service-monitor"
+    name: "服务监控脚本"
+    command: "/usr/local/bin/monitor.sh"
+    args:
+      - "nginx"
+      - "mysql"
+    timeout: 30
+    interval: 60      # 1分钟执行一次
+
+  # Windows示例（Windows系统）
+  # - id: "windows-check"
+  #   name: "Windows系统检查"
+  #   command: "powershell"
+  #   args:
+  #     - "-File"
+  #     - "C:\\Scripts\\check.ps1"
+  #   timeout: 30
+  #   interval: 300
+
+# ============================================
+# 服务状态监控配置
+# ============================================
+services:
+  # Linux系统服务
+  - "sshd"           # SSH服务
+  - "docker"         # Docker服务
+  - "nginx"          # Nginx Web服务器
+  - "apache2"        # Apache Web服务器
+  - "mysql"          # MySQL数据库
+  - "postgresql"     # PostgreSQL数据库
+  - "redis"          # Redis缓存
+  - "mongodb"        # MongoDB数据库
+  - "elasticsearch"  # Elasticsearch搜索
+  - "kafka"          # Kafka消息队列
+  - "zookeeper"      # Zookeeper协调服务
+  
+  # 自定义服务
+  - "myapp"          # 自定义应用服务
+  - "custom-service" # 自定义服务名称
+
+  # Windows服务示例（Windows系统）
+  # - "Spooler"       # 打印服务
+  # - "Themes"        # 主题服务
+  # - "WSearch"       # Windows搜索
+  # - "MySQL80"       # MySQL服务
+  # - "MSSQLSERVER"   # SQL Server服务
+
