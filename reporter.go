@@ -329,13 +329,19 @@ func (r *Reporter) ReportServiceStatus(data *ServiceMetrics) error {
 	}
 
 	for _, s := range data.Services {
-		req.Services = append(req.Services, &pb.ServiceInfo{
+		svcInfo := &pb.ServiceInfo{
 			Name:         s.Name,
 			Status:       s.Status,
 			Enabled:      s.Enabled,
 			Description:  s.Description,
 			UptimeSeconds: s.Uptime,
-		})
+		}
+		// 如果有端口信息，添加端口和端口检查结果
+		if s.Port > 0 {
+			svcInfo.Port = int32(s.Port)
+			svcInfo.PortAccessible = s.PortAccessible
+		}
+		req.Services = append(req.Services, svcInfo)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -3,3 +3,17 @@ host_id: "server-001"
 collect_interval: 10
 manual_ip: "192.168.21.14"  # 手动指定IP
 debug: false
+
+#服务端口监控
+service_ports:
+  - name: "nginx"
+    port: 8081
+    host: "localhost"  # 可选，默认为 localhost
+    description: "Nginx Web服务器"
+  - name: "mysql"
+    port: 3306
+    host: "localhost"
+    description: "MySQL数据库"
+  - name: "redis"
+    port: 6379
+    description: "Redis缓存"

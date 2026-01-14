@@ -59,18 +59,35 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent 
 	}
 	
 	// 服务状态检测器（从配置读取服务列表）
-	services := []string{
-		"sshd",
-		"docker",
-		"nginx",
-	}
-	if len(config.Services) > 0 {
-		services = config.Services
-		log.Printf("Loaded %d services from config", len(services))
+	// 优先使用新的服务端口配置（支持端口检查）
+	var serviceCollector *ServiceCollector
+	if len(config.ServicePorts) > 0 {
+		log.Printf("Loaded %d service ports from config", len(config.ServicePorts))
+		// 转换配置类型
+		ports := make([]ServicePortConfig, len(config.ServicePorts))
+		for i, p := range config.ServicePorts {
+			ports[i] = ServicePortConfig{
+				Name:        p.Name,
+				Port:        p.Port,
+				Host:        p.Host,
+				Description: p.Description,
+			}
+		}
+		serviceCollector = NewServiceCollectorWithPorts(ports)
+	} else if len(config.Services) > 0 {
+		// 兼容旧格式
+		log.Printf("Loaded %d services from config (legacy format)", len(config.Services))
+		serviceCollector = NewServiceCollector(config.Services)
 	} else {
+		// 使用默认服务
+		defaultServices := []string{
+			"sshd",
+			"docker",
+			"nginx",
+		}
 		log.Printf("Using default services")
+		serviceCollector = NewServiceCollector(defaultServices)
 	}
-	serviceCollector := NewServiceCollector(services)
 	collectors = append(collectors, serviceCollector)
 	
 	return &Agent{

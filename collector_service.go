@@ -1,24 +1,35 @@
 // ============================================
 // 文件: collector_service.go
-// 服务状态检测器
+// 服务状态检测器（增强版：支持端口检查）
 // ============================================
 package main
 
 import (
+	"fmt"
+	"net"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // ServiceCollector 服务状态检测器
 type ServiceCollector struct {
-	services []string // 要检测的服务列表
+	services     []string            // 要检测的服务列表（兼容旧格式）
+	servicePorts []ServicePortConfig // 服务端口配置（新格式，使用 config_agent.go 中的定义）
 }
 
 // NewServiceCollector 创建服务检测器
 func NewServiceCollector(services []string) *ServiceCollector {
 	return &ServiceCollector{
 		services: services,
+	}
+}
+
+// NewServiceCollectorWithPorts 创建支持端口检查的服务检测器
+func NewServiceCollectorWithPorts(servicePorts []ServicePortConfig) *ServiceCollector {
+	return &ServiceCollector{
+		servicePorts: servicePorts,
 	}
 }
 
@@ -31,16 +42,26 @@ func (s *ServiceCollector) Name() string {
 func (s *ServiceCollector) Collect() (interface{}, error) {
 	var serviceList []ServiceInfo
 
-	// 如果没有指定服务列表，尝试检测常见服务
-	servicesToCheck := s.services
-	if len(servicesToCheck) == 0 {
-		servicesToCheck = s.getDefaultServices()
-	}
+	// 优先使用新的服务端口配置
+	if len(s.servicePorts) > 0 {
+		for _, svcConfig := range s.servicePorts {
+			info := s.checkServiceWithPort(svcConfig)
+			if info != nil {
+				serviceList = append(serviceList, *info)
+			}
+		}
+	} else {
+		// 兼容旧格式：使用服务名称列表
+		servicesToCheck := s.services
+		if len(servicesToCheck) == 0 {
+			servicesToCheck = s.getDefaultServices()
+		}
 
-	for _, serviceName := range servicesToCheck {
-		info := s.checkService(serviceName)
-		if info != nil {
-			serviceList = append(serviceList, *info)
+		for _, serviceName := range servicesToCheck {
+			info := s.checkService(serviceName)
+			if info != nil {
+				serviceList = append(serviceList, *info)
+			}
 		}
 	}
 
@@ -145,13 +166,82 @@ func (s *ServiceCollector) getDefaultServices() []string {
 	}
 }
 
-// ServiceInfo 服务信息
+// checkServiceWithPort 检查服务状态（支持端口检查，类似 telnet）
+func (s *ServiceCollector) checkServiceWithPort(config ServicePortConfig) *ServiceInfo {
+	// 首先检查系统服务状态
+	serviceInfo := s.checkService(config.Name)
+	
+	// 如果没有配置端口，只返回系统服务状态
+	if config.Port <= 0 {
+		return serviceInfo
+	}
+	
+	// 如果有配置端口，进行端口检查（类似 telnet）
+	host := config.Host
+	if host == "" {
+		host = "localhost"
+	}
+	
+	// 执行端口探测
+	portAccessible := s.probePort(host, config.Port)
+	
+	// 创建服务信息
+	info := &ServiceInfo{
+		Name:        config.Name,
+		Status:      serviceInfo.Status,
+		Enabled:     serviceInfo.Enabled,
+		Description: config.Description,
+		Uptime:      serviceInfo.Uptime,
+	}
+	
+	// 如果配置了描述，使用配置的描述
+	if config.Description != "" {
+		info.Description = config.Description
+	}
+	
+	// 设置端口信息
+	info.Port = config.Port
+	info.PortAccessible = portAccessible
+	
+	// 如果系统服务状态是 running，但端口不可访问，则标记为 failed
+	if serviceInfo.Status == "running" && !portAccessible {
+		info.Status = "failed"
+	} else if serviceInfo.Status == "stopped" && portAccessible {
+		// 如果系统服务状态是 stopped，但端口可访问，可能是服务名称不对，但端口确实在运行
+		info.Status = "running"
+	} else if serviceInfo.Status == "" && portAccessible {
+		// 如果系统服务不存在，但端口可访问，标记为 running
+		info.Status = "running"
+	}
+	
+	return info
+}
+
+// probePort 端口探测（类似 telnet）
+func (s *ServiceCollector) probePort(host string, port int) bool {
+	address := fmt.Sprintf("%s:%d", host, port)
+	timeout := 3 * time.Second
+	
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		return false
+	}
+	
+	if conn != nil {
+		conn.Close()
+	}
+	return true
+}
+
+// ServiceInfo 服务信息（扩展版：支持端口检查）
 type ServiceInfo struct {
-	Name        string `json:"name"`
-	Status      string `json:"status"`      // running, stopped, failed, unknown
-	Enabled     bool   `json:"enabled"`     // 是否开机自启
-	Description string `json:"description"` // 服务描述
-	Uptime      int64  `json:"uptime_seconds"` // 运行时长（秒）
+	Name          string `json:"name"`
+	Status        string `json:"status"`          // running, stopped, failed, unknown
+	Enabled       bool   `json:"enabled"`         // 是否开机自启
+	Description   string `json:"description"`     // 服务描述
+	Uptime        int64  `json:"uptime_seconds"`  // 运行时长（秒）
+	Port          int    `json:"port,omitempty"`  // 服务端口
+	PortAccessible bool  `json:"port_accessible,omitempty"` // 端口是否可访问
 }
 
 // ServiceMetrics 服务指标
