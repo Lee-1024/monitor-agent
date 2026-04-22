@@ -305,6 +305,44 @@ protoc --go_out=. --go_opt=paths=source_relative \
 
 ## 🚢 部署
 
+### Docker 构建与运行
+
+项目提供 `Dockerfile`，可用于构建 Agent 镜像并在容器中运行。
+
+**构建镜像：**
+
+```bash
+cd monitor-agent
+docker build -t monitor-agent:latest .
+```
+
+**运行容器：**
+
+需挂载配置文件（或通过环境变量指定配置路径），并确保能访问 Backend 的 gRPC 端口（默认 50051）。
+
+```bash
+# 使用宿主机上的 agent-config.yaml
+docker run -d --name monitor-agent \
+  -v /path/on/host/agent-config.yaml:/app/agent-config.yaml \
+  -e CONFIG_PATH=/app/agent-config.yaml \
+  monitor-agent:latest
+```
+
+若需采集宿主机指标，建议挂载必要路径并赋予相应权限（按需使用 `--pid=host` 或挂载 `/proc`、`/sys` 等），例如：
+
+```bash
+docker run -d --name monitor-agent \
+  -v /path/on/host/agent-config.yaml:/app/agent-config.yaml \
+  -v /proc:/host/proc:ro \
+  -v /sys:/host/sys:ro \
+  -e CONFIG_PATH=/app/agent-config.yaml \
+  monitor-agent:latest
+```
+
+**环境变量：**
+
+- `CONFIG_PATH`：配置文件路径，默认 `/app/agent-config.yaml`。挂载配置时请与此路径一致。
+
 ### 编译
 
 ```bash

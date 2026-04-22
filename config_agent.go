@@ -39,7 +39,10 @@ func LoadAgentConfig() *AgentConfig {
 		Debug:           false,
 	}
 
-	configFile := "agent-config.yaml"
+	configFile := os.Getenv("CONFIG_PATH")
+	if configFile == "" {
+		configFile = "agent-config.yaml"
+	}
 	if data, err := os.ReadFile(configFile); err == nil {
 		if err := yaml.Unmarshal(data, config); err != nil {
 			log.Printf("Failed to parse config: %v", err)
