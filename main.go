@@ -16,11 +16,12 @@ type Agent struct {
 	CollectInterval time.Duration
 	collectors      []Collector
 	reporter        *Reporter
+	logCollector    *LogCollector // 独立的日志收集器
 }
 
 func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent {
 	config := LoadAgentConfig()
-	
+
 	// 基础收集器
 	collectors := []Collector{
 		&CPUCollector{},
@@ -28,11 +29,11 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent 
 		&DiskCollector{},
 		&NetworkCollector{},
 	}
-	
+
 	// 进程监控收集器
 	processCollector := NewProcessCollector(50) // 最多收集50个进程
 	collectors = append(collectors, processCollector)
-	
+
 	// 日志收集器（从配置读取日志路径）
 	logPaths := []string{
 		"/var/log/syslog",
@@ -48,7 +49,7 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent 
 	}
 	logCollector := NewLogCollector(logPaths, 100) // 每个文件最多100行
 	collectors = append(collectors, logCollector)
-	
+
 	// 脚本执行器（从配置读取脚本列表）
 	if len(config.Scripts) > 0 {
 		log.Printf("Loaded %d scripts from config", len(config.Scripts))
@@ -57,7 +58,7 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent 
 	} else {
 		log.Printf("No scripts configured")
 	}
-	
+
 	// 服务状态检测器（从配置读取服务列表）
 	// 优先使用新的服务端口配置（支持端口检查）
 	var serviceCollector *ServiceCollector
@@ -89,12 +90,13 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent 
 		serviceCollector = NewServiceCollector(defaultServices)
 	}
 	collectors = append(collectors, serviceCollector)
-	
+
 	return &Agent{
 		HostID:          hostID,
 		CollectInterval: interval,
 		reporter:        reporter,
 		collectors:      collectors,
+		logCollector:    logCollector,
 	}
 }
 
@@ -108,16 +110,73 @@ func (a *Agent) Start() {
 	heartbeatTicker := time.NewTicker(30 * time.Second)
 	defer heartbeatTicker.Stop()
 
+	// 日志采集ticker（独立间隔，默认1分钟）
+	logTicker := time.NewTicker(60 * time.Second) // 日志采集间隔改为1分钟
+	defer logTicker.Stop()
+
 	for {
 		select {
 		case <-ticker.C:
 			metrics := a.collectMetrics()
 			a.reportMetrics(metrics)
-			// 上报额外的监控数据（进程、日志、脚本、服务）
-			a.reportAdditionalMetrics(metrics)
+			// 上报额外的监控数据（进程、脚本、服务，不包括日志）
+			a.reportCoreMetrics(metrics)
+		case <-logTicker.C:
+			// 单独采集和上报日志
+			a.collectAndReportLogs()
 		case <-heartbeatTicker.C:
 			if a.reporter != nil {
 				a.reporter.SendHeartbeat()
+			}
+		}
+	}
+}
+
+// reportCoreMetrics 上报核心监控数据（不包括日志）
+func (a *Agent) reportCoreMetrics(metrics *MetricsData) {
+	if a.reporter == nil {
+		return
+	}
+
+	// 上报进程数据
+	if processData, ok := metrics.Metrics["process"].(*ProcessMetrics); ok {
+		log.Printf("Reporting %d processes to server", len(processData.Processes))
+		if err := a.reporter.ReportProcesses(processData); err != nil {
+			log.Printf("Failed to report processes: %v", err)
+		} else {
+			log.Printf("Successfully reported %d processes", len(processData.Processes))
+		}
+	}
+
+	// 上报脚本执行结果
+	if scriptData, ok := metrics.Metrics["script"].(*ScriptMetrics); ok {
+		if err := a.reporter.ReportScriptResults(scriptData); err != nil {
+			log.Printf("Failed to report script results: %v", err)
+		}
+	}
+}
+
+// collectAndReportLogs 单独采集和上报日志
+func (a *Agent) collectAndReportLogs() {
+	if a.reporter == nil || a.logCollector == nil {
+		return
+	}
+
+	// 采集日志
+	logData, err := a.logCollector.Collect()
+	if err != nil {
+		log.Printf("Failed to collect logs: %v", err)
+		return
+	}
+
+	// 上报日志
+	if logMetrics, ok := logData.(*LogMetrics); ok {
+		if len(logMetrics.Entries) > 0 {
+			log.Printf("Reporting %d log entries to server", len(logMetrics.Entries))
+			if err := a.reporter.ReportLogs(logMetrics); err != nil {
+				log.Printf("Failed to report logs: %v", err)
+			} else {
+				log.Printf("Successfully reported %d log entries", len(logMetrics.Entries))
 			}
 		}
 	}
@@ -174,21 +233,21 @@ func (a *Agent) reportAdditionalMetrics(metrics *MetricsData) {
 	} else {
 		log.Printf("No process data found in metrics (type: %T, value: %v)", metrics.Metrics["process"], metrics.Metrics["process"])
 	}
-	
+
 	// 上报日志数据
 	if logData, ok := metrics.Metrics["log"].(*LogMetrics); ok {
 		if err := a.reporter.ReportLogs(logData); err != nil {
 			log.Printf("Failed to report logs: %v", err)
 		}
 	}
-	
+
 	// 上报脚本执行结果
 	if scriptData, ok := metrics.Metrics["script"].(*ScriptMetrics); ok {
 		if err := a.reporter.ReportScriptResults(scriptData); err != nil {
 			log.Printf("Failed to report script results: %v", err)
 		}
 	}
-	
+
 	// 上报服务状态
 	if serviceData, ok := metrics.Metrics["service"].(*ServiceMetrics); ok {
 		if err := a.reporter.ReportServiceStatus(serviceData); err != nil {

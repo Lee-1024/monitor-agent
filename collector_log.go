@@ -34,7 +34,7 @@ func (c *LogCollector) Name() string {
 	return "log"
 }
 
-// Collect 采集日志
+// Collect 采集日志（只采集ERROR和WARN级别）
 func (c *LogCollector) Collect() (interface{}, error) {
 	var allLogs []LogEntry
 
@@ -46,9 +46,17 @@ func (c *LogCollector) Collect() (interface{}, error) {
 		allLogs = append(allLogs, logs...)
 	}
 
+	// 只返回ERROR和WARN级别的日志，减少数据量
+	var filteredLogs []LogEntry
+	for _, log := range allLogs {
+		if log.Level == "ERROR" || log.Level == "WARN" {
+			filteredLogs = append(filteredLogs, log)
+		}
+	}
+
 	return &LogMetrics{
-		Entries: allLogs,
-		Count:   len(allLogs),
+		Entries: filteredLogs,
+		Count:   len(filteredLogs),
 	}, nil
 }
 

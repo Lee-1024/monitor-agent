@@ -1,7 +1,7 @@
-server_addr: "localhost:50051"
+server_addr: "10.54.56.88:50051"
 host_id: "server-001"
 collect_interval: 10
-manual_ip: "192.168.21.14"  # 手动指定IP
+manual_ip: "10.54.56.88"  # 手动指定IP
 debug: false
 
 #服务端口监控
