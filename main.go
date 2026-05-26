@@ -72,13 +72,8 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter, config 
 		serviceCollector = NewServiceCollector(config.Services)
 	} else {
 		// 使用默认服务
-		defaultServices := []string{
-			"sshd",
-			"docker",
-			"nginx",
-		}
-		log.Printf("Using default services")
-		serviceCollector = NewServiceCollector(defaultServices)
+		log.Printf("No services configured, service monitoring disabled")
+		serviceCollector = NewServiceCollector(nil)
 	}
 	collectors = append(collectors, serviceCollector)
 
