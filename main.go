@@ -34,21 +34,14 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent 
 	processCollector := NewProcessCollector(50) // 最多收集50个进程
 	collectors = append(collectors, processCollector)
 
-	// 日志收集器（从配置读取日志路径）
-	logPaths := []string{
-		"/var/log/syslog",
-		"/var/log/messages",
-		"/var/log/nginx/access.log",
-		"/var/log/nginx/error.log",
-	}
-	if len(config.LogPaths) > 0 {
-		logPaths = config.LogPaths
-		log.Printf("Loaded %d log paths from config", len(logPaths))
+	var logCollector *LogCollector
+	if config.LogCollectionEnabled() {
+		log.Printf("Loaded %d log paths from config", len(config.LogPaths))
+		logCollector = NewLogCollector(config.LogPaths, 100) // 每个文件最多100行
+		collectors = append(collectors, logCollector)
 	} else {
-		log.Printf("Using default log paths")
+		log.Printf("No log paths configured, log collection disabled")
 	}
-	logCollector := NewLogCollector(logPaths, 100) // 每个文件最多100行
-	collectors = append(collectors, logCollector)
 
 	// 脚本执行器（从配置读取脚本列表）
 	if len(config.Scripts) > 0 {

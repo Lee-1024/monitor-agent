@@ -6,7 +6,10 @@ package main
 
 import (
 	"log"
+	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/mem"
@@ -82,7 +85,7 @@ func (c *ProcessCollector) Collect() (interface{}, error) {
 		cpu  float64
 	}
 	var processCPUList []processCPU
-	
+
 	log.Printf("Collecting CPU usage for %d processes...", maxCheckProcesses)
 	collectedCount := 0
 	maxCPU := 0.0
@@ -92,14 +95,14 @@ func (c *ProcessCollector) Collect() (interface{}, error) {
 		if err != nil {
 			continue
 		}
-		
+
 		// 收集所有进程用于排序（包括CPU为0的，但会按CPU使用率排序）
 		processCPUList = append(processCPUList, processCPU{
 			proc: p,
 			cpu:  cpuPercent,
 		})
 		collectedCount++
-		
+
 		// 记录最大CPU使用率（用于日志输出）
 		if cpuPercent > maxCPU {
 			maxCPU = cpuPercent
@@ -130,7 +133,7 @@ func (c *ProcessCollector) Collect() (interface{}, error) {
 	// 第五步：获取每个进程的详细信息
 	var processList []ProcessInfo
 	errorCount := 0
-	
+
 	log.Printf("Getting detailed info for top %d processes...", len(processCPUList))
 	for _, pc := range processCPUList {
 		info, err := c.getProcessInfo(pc.proc, totalMemory)
@@ -161,16 +164,16 @@ func (c *ProcessCollector) getProcessInfo(p *process.Process, totalMemory uint64
 	if err != nil {
 		return nil, err
 	}
-	
+
 	username, _ := p.Username()
-	
+
 	memInfo, err := p.MemoryInfo()
 	var memoryBytes uint64 = 0
 	var memoryPercent float64 = 0.0
-	
+
 	if err == nil && memInfo != nil {
 		memoryBytes = memInfo.RSS // RSS: 实际物理内存使用（Resident Set Size）
-		
+
 		// 手动计算内存百分比（与top命令一致）
 		// top命令使用 RSS / 总内存 * 100
 		if totalMemory > 0 {
@@ -187,9 +190,9 @@ func (c *ProcessCollector) getProcessInfo(p *process.Process, totalMemory uint64
 			memoryPercent = float64(memPercent)
 		}
 	}
-	
+
 	createTime, _ := p.CreateTime()
-	statusSlice, _ := p.Status()
+	statusStr := c.getTopCompatibleStatus(p)
 	cmdline, _ := p.Cmdline()
 
 	// 限制命令长度
@@ -197,37 +200,77 @@ func (c *ProcessCollector) getProcessInfo(p *process.Process, totalMemory uint64
 		cmdline = cmdline[:200] + "..."
 	}
 
-	// 处理status（可能是[]string）
-	statusStr := ""
-	if len(statusSlice) > 0 {
-		statusStr = statusSlice[0]
-	}
-
 	// CPU使用率将在Collect中通过时间间隔计算，这里先设为0
 	return &ProcessInfo{
-		PID:          int32(p.Pid),
-		Name:         name,
-		User:         username,
-		CPUPercent:   0.0, // 将在Collect中设置
+		PID:           int32(p.Pid),
+		Name:          name,
+		User:          username,
+		CPUPercent:    0.0, // 将在Collect中设置
 		MemoryPercent: memoryPercent,
-		MemoryBytes:  memoryBytes,
-		CreateTime:   createTime / 1000, // 转换为秒
-		Status:       statusStr,
-		Command:      cmdline,
+		MemoryBytes:   memoryBytes,
+		CreateTime:    createTime / 1000, // 转换为秒
+		Status:        statusStr,
+		Command:       cmdline,
 	}, nil
+}
+
+func (c *ProcessCollector) getTopCompatibleStatus(p *process.Process) string {
+	if status := readLinuxProcessState(p.Pid); status != "" {
+		return status
+	}
+
+	statusSlice, _ := p.Status()
+	if len(statusSlice) == 0 {
+		return ""
+	}
+	return normalizeProcessStatus(statusSlice[0])
+}
+
+func readLinuxProcessState(pid int32) string {
+	data, err := os.ReadFile("/proc/" + strconv.FormatInt(int64(pid), 10) + "/stat")
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) < 3 || len(fields[2]) != 1 {
+		return ""
+	}
+	return fields[2]
+}
+
+func normalizeProcessStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "run", "r":
+		return "R"
+	case "sleep", "sleeping", "idle", "s":
+		return "S"
+	case "disk-sleep", "iowait", "d":
+		return "D"
+	case "stop", "stopped", "t":
+		return "T"
+	case "zombie", "z":
+		return "Z"
+	case "dead", "x":
+		return "X"
+	default:
+		if len(status) == 1 {
+			return strings.ToUpper(status)
+		}
+		return ""
+	}
 }
 
 // ProcessInfo 进程信息
 type ProcessInfo struct {
-	PID          int32   `json:"pid"`
-	Name         string  `json:"name"`
-	User         string  `json:"user"`
-	CPUPercent   float64 `json:"cpu_percent"`
+	PID           int32   `json:"pid"`
+	Name          string  `json:"name"`
+	User          string  `json:"user"`
+	CPUPercent    float64 `json:"cpu_percent"`
 	MemoryPercent float64 `json:"memory_percent"`
-	MemoryBytes  uint64  `json:"memory_bytes"`
-	CreateTime   int64   `json:"create_time"`
-	Status       string  `json:"status"`
-	Command      string  `json:"command"`
+	MemoryBytes   uint64  `json:"memory_bytes"`
+	CreateTime    int64   `json:"create_time"`
+	Status        string  `json:"status"`
+	Command       string  `json:"command"`
 }
 
 // ProcessMetrics 进程指标
@@ -236,4 +279,3 @@ type ProcessMetrics struct {
 	Total     int           `json:"total"`
 	Collected int           `json:"collected"`
 }
-

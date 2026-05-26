@@ -23,6 +23,7 @@ type Reporter struct {
 	conn       *grpc.ClientConn
 	serverAddr string
 	hostID     string
+	config     *AgentConfig
 	registered bool
 }
 
@@ -45,6 +46,7 @@ func NewReporter(serverAddr, hostID string) (*Reporter, error) {
 		conn:       conn,
 		serverAddr: serverAddr,
 		hostID:     hostID,
+		config:     LoadAgentConfig(),
 		registered: false,
 	}
 
@@ -59,7 +61,8 @@ func NewReporter(serverAddr, hostID string) (*Reporter, error) {
 
 // register 注册Agent
 func (r *Reporter) register() error {
-	hostname, _ := os.Hostname()
+	systemHostname, _ := os.Hostname()
+	hostname := r.config.EffectiveHostname(systemHostname)
 	// 读取配置
 	ip := r.getIPAddress()
 
@@ -224,15 +227,15 @@ func (r *Reporter) ReportProcesses(data *ProcessMetrics) error {
 
 	for _, p := range data.Processes {
 		req.Processes = append(req.Processes, &pb.ProcessInfo{
-			Pid:          p.PID,
-			Name:         p.Name,
-			User:         p.User,
-			CpuPercent:   p.CPUPercent,
+			Pid:           p.PID,
+			Name:          p.Name,
+			User:          p.User,
+			CpuPercent:    p.CPUPercent,
 			MemoryPercent: p.MemoryPercent,
-			MemoryBytes:  p.MemoryBytes,
-			CreateTime:   p.CreateTime,
-			Status:       p.Status,
-			Command:      p.Command,
+			MemoryBytes:   p.MemoryBytes,
+			CreateTime:    p.CreateTime,
+			Status:        p.Status,
+			Command:       p.Command,
 		})
 	}
 
@@ -294,7 +297,7 @@ func (r *Reporter) ReportScriptResults(data *ScriptMetrics) error {
 	for _, result := range data.Results {
 		req := &pb.ScriptResultRequest{
 			HostId:     r.hostID,
-			ScriptId:    result.ScriptID,
+			ScriptId:   result.ScriptID,
 			ScriptName: result.ScriptName,
 			Timestamp:  result.Timestamp,
 			Success:    result.Success,
@@ -330,10 +333,10 @@ func (r *Reporter) ReportServiceStatus(data *ServiceMetrics) error {
 
 	for _, s := range data.Services {
 		svcInfo := &pb.ServiceInfo{
-			Name:         s.Name,
-			Status:       s.Status,
-			Enabled:      s.Enabled,
-			Description:  s.Description,
+			Name:          s.Name,
+			Status:        s.Status,
+			Enabled:       s.Enabled,
+			Description:   s.Description,
 			UptimeSeconds: s.Uptime,
 		}
 		// 如果有端口信息，添加端口和端口检查结果
@@ -388,7 +391,7 @@ func getLocalIP() string {
 }
 
 func (r *Reporter) getIPAddress() string {
-	config := LoadAgentConfig()
+	config := r.config
 
 	if config.ManualIP != "" {
 		log.Printf("Using manual IP from config: %s", config.ManualIP)

@@ -8,6 +8,9 @@ server_addr: "localhost:50051"
 # 主机ID（唯一标识）
 host_id: "server-001"
 
+# 主机显示名称（可选，不配置时使用系统 hostname）
+hostname: "生产服务器-01"
+
 # 采集间隔（秒）
 collect_interval: 10
 
