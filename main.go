@@ -104,9 +104,9 @@ func (a *Agent) Start() {
 		select {
 		case <-ticker.C:
 			metrics := a.collectMetrics()
-			a.reportMetrics(metrics)
 			// 上报额外的监控数据（进程、脚本、服务，不包括日志）
 			a.reportCoreMetrics(metrics)
+			a.reportMetrics(metrics)
 		case <-logTicker.C:
 			// 单独采集和上报日志
 			a.collectAndReportLogs()
@@ -138,6 +138,14 @@ func (a *Agent) reportCoreMetrics(metrics *MetricsData) {
 	if scriptData, ok := metrics.Metrics["script"].(*ScriptMetrics); ok {
 		if err := a.reporter.ReportScriptResults(scriptData); err != nil {
 			log.Printf("Failed to report script results: %v", err)
+		}
+	}
+
+	if serviceData, ok := metrics.Metrics["service"].(*ServiceMetrics); ok {
+		if len(serviceData.Services) > 0 {
+			if err := a.reporter.ReportServiceStatus(serviceData); err != nil {
+				log.Printf("Failed to report service status: %v", err)
+			}
 		}
 	}
 }

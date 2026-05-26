@@ -326,13 +326,19 @@ func (r *Reporter) ReportScriptResults(data *ScriptMetrics) error {
 // ReportServiceStatus 上报服务状态
 func (r *Reporter) ReportServiceStatus(data *ServiceMetrics) error {
 	if !r.registered {
+		log.Printf("Reporter not registered, skipping service status report")
+		return nil
+	}
+
+	if data == nil || len(data.Services) == 0 {
+		log.Printf("No service status data to report")
 		return nil
 	}
 
 	req := &pb.ServiceStatusRequest{
 		HostId:    r.hostID,
 		Timestamp: time.Now().Unix(),
-		Services:  make([]*pb.ServiceInfo, 0),
+		Services:  make([]*pb.ServiceInfo, 0, len(data.Services)),
 	}
 
 	for _, s := range data.Services {
@@ -351,10 +357,23 @@ func (r *Reporter) ReportServiceStatus(data *ServiceMetrics) error {
 		req.Services = append(req.Services, svcInfo)
 	}
 
+	log.Printf("Sending %d service statuses to server", len(req.Services))
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := r.client.ReportServiceStatus(ctx, req)
+	resp, err := r.client.ReportServiceStatus(ctx, req)
+	if err != nil {
+		log.Printf("Failed to send service status data: %v", err)
+		return err
+	}
+
+	if resp != nil && resp.Success {
+		log.Printf("Service status reported successfully: %s", resp.Message)
+	} else {
+		log.Printf("Server rejected service status: success=%v, message=%s", resp != nil && resp.Success, resp.GetMessage())
+	}
+
 	return err
 }
 
