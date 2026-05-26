@@ -19,9 +19,7 @@ type Agent struct {
 	logCollector    *LogCollector // 独立的日志收集器
 }
 
-func NewAgent(hostID string, interval time.Duration, reporter *Reporter) *Agent {
-	config := LoadAgentConfig()
-
+func NewAgent(hostID string, interval time.Duration, reporter *Reporter, config *AgentConfig) *Agent {
 	// 基础收集器
 	collectors := []Collector{
 		&CPUCollector{},
@@ -255,14 +253,18 @@ func main() {
 	hostID := flag.String("host-id", "host-001", "Host ID")
 	interval := flag.Int("interval", 10, "Collect interval in seconds")
 	debug := flag.Bool("debug", false, "Debug mode (print to console)")
+	configPath := flag.String("config", ConfigPathFromEnv(), "Config file path")
 	flag.Parse()
+
+	config := LoadAgentConfigFromPath(*configPath)
+	applyFlagOverrides(config, serverAddr, hostID, interval, debug)
 
 	var reporter *Reporter
 	var err error
 
 	// 如果指定了服务器地址且非调试模式，则使用gRPC上报
 	if *serverAddr != "" && !*debug {
-		reporter, err = NewReporter(*serverAddr, *hostID)
+		reporter, err = NewReporterWithConfig(*serverAddr, *hostID, config)
 		if err != nil {
 			log.Fatalf("Failed to create reporter: %v", err)
 		}
@@ -271,6 +273,31 @@ func main() {
 		log.Println("Running in debug mode, metrics will be printed to console")
 	}
 
-	agent := NewAgent(*hostID, time.Duration(*interval)*time.Second, reporter)
+	agent := NewAgent(*hostID, time.Duration(*interval)*time.Second, reporter, config)
 	agent.Start()
+}
+
+func isFlagSet(name string) bool {
+	found := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
+func applyFlagOverrides(config *AgentConfig, serverAddr *string, hostID *string, interval *int, debug *bool) {
+	if !isFlagSet("server") {
+		*serverAddr = config.ServerAddr
+	}
+	if !isFlagSet("host-id") {
+		*hostID = config.HostID
+	}
+	if !isFlagSet("interval") {
+		*interval = config.CollectInterval
+	}
+	if !isFlagSet("debug") {
+		*debug = config.Debug
+	}
 }

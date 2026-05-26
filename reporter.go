@@ -29,6 +29,10 @@ type Reporter struct {
 
 // NewReporter 创建上报器
 func NewReporter(serverAddr, hostID string) (*Reporter, error) {
+	return NewReporterWithConfig(serverAddr, hostID, LoadAgentConfig())
+}
+
+func NewReporterWithConfig(serverAddr, hostID string, config *AgentConfig) (*Reporter, error) {
 	// 建立gRPC连接
 	conn, err := grpc.Dial(serverAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -46,7 +50,7 @@ func NewReporter(serverAddr, hostID string) (*Reporter, error) {
 		conn:       conn,
 		serverAddr: serverAddr,
 		hostID:     hostID,
-		config:     LoadAgentConfig(),
+		config:     config,
 		registered: false,
 	}
 

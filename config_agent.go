@@ -32,6 +32,18 @@ type ServicePortConfig struct {
 }
 
 func LoadAgentConfig() *AgentConfig {
+	return LoadAgentConfigFromPath(ConfigPathFromEnv())
+}
+
+func ConfigPathFromEnv() string {
+	configFile := os.Getenv("CONFIG_PATH")
+	if configFile == "" {
+		configFile = "agent-config.yaml"
+	}
+	return configFile
+}
+
+func LoadAgentConfigFromPath(configFile string) *AgentConfig {
 	config := &AgentConfig{
 		ServerAddr:      "localhost:50051",
 		HostID:          "host-001",
@@ -40,7 +52,6 @@ func LoadAgentConfig() *AgentConfig {
 		Debug:           false,
 	}
 
-	configFile := os.Getenv("CONFIG_PATH")
 	if configFile == "" {
 		configFile = "agent-config.yaml"
 	}
