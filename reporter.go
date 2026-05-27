@@ -172,6 +172,30 @@ func (r *Reporter) Report(data *MetricsData) error {
 		req.Network = netMetrics
 	}
 
+	if gpu, ok := data.Metrics["gpu"].(*GPUMetrics); ok {
+		gpuMetrics := &pb.GPUMetrics{
+			Devices: make([]*pb.GPUDeviceMetrics, 0, len(gpu.Devices)),
+		}
+		for _, device := range gpu.Devices {
+			gpuMetrics.Devices = append(gpuMetrics.Devices, &pb.GPUDeviceMetrics{
+				Index:              int32(device.Index),
+				Name:               device.Name,
+				Vendor:             device.Vendor,
+				Model:              device.Model,
+				Uuid:               device.UUID,
+				DriverVersion:      device.DriverVersion,
+				UtilizationPercent: device.UtilizationPercent,
+				MemoryTotal:        device.MemoryTotal,
+				MemoryUsed:         device.MemoryUsed,
+				MemoryUsedPercent:  device.MemoryUsedPercent,
+				Temperature:        device.Temperature,
+				PowerWatts:         device.PowerWatts,
+				FanSpeedPercent:    device.FanSpeedPercent,
+			})
+		}
+		req.Gpu = gpuMetrics
+	}
+
 	// 发送请求
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -21,6 +21,17 @@ type AgentConfig struct {
 	Scripts         []ScriptConfig      `yaml:"scripts"`       // 脚本配置列表
 	Services        []string            `yaml:"services"`      // 要检测的服务列表（兼容旧格式）
 	ServicePorts    []ServicePortConfig `yaml:"service_ports"` // 服务端口配置（新格式，支持端口检查）
+	GPU             GPUConfig           `yaml:"gpu"`
+}
+
+type GPUConfig struct {
+	Enabled       bool              `yaml:"enabled"`
+	Provider      string            `yaml:"provider"`
+	Providers     []string          `yaml:"providers"`
+	Command       string            `yaml:"command"`
+	Args          []string          `yaml:"args"`
+	Timeout       int               `yaml:"timeout"`
+	FieldMappings map[string]string `yaml:"field_mappings"`
 }
 
 // ServicePortConfig 服务端口配置（支持端口检查，类似 telnet）
@@ -50,6 +61,11 @@ func LoadAgentConfigFromPath(configFile string) *AgentConfig {
 		CollectInterval: 10,
 		ManualIP:        "",
 		Debug:           false,
+		GPU: GPUConfig{
+			Enabled:  true,
+			Provider: "auto",
+			Timeout:  5,
+		},
 	}
 
 	if configFile == "" {

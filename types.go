@@ -65,3 +65,25 @@ type InterfaceMetrics struct {
 	Errin       uint64 `json:"errin"`
 	Errout      uint64 `json:"errout"`
 }
+
+// GPUMetrics GPU指标
+type GPUMetrics struct {
+	Devices []GPUDeviceMetrics `json:"devices"`
+}
+
+// GPUDeviceMetrics 单块GPU指标，字段保持厂商中立
+type GPUDeviceMetrics struct {
+	Index              int     `json:"index"`
+	Name               string  `json:"name"`
+	Vendor             string  `json:"vendor"`
+	Model              string  `json:"model"`
+	UUID               string  `json:"uuid"`
+	DriverVersion      string  `json:"driver_version"`
+	UtilizationPercent float64 `json:"utilization_percent"`
+	MemoryTotal        uint64  `json:"memory_total"`
+	MemoryUsed         uint64  `json:"memory_used"`
+	MemoryUsedPercent  float64 `json:"memory_used_percent"`
+	Temperature        float64 `json:"temperature"`
+	PowerWatts         float64 `json:"power_watts"`
+	FanSpeedPercent    float64 `json:"fan_speed_percent"`
+}

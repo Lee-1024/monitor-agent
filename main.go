@@ -27,6 +27,7 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter, config 
 		&DiskCollector{},
 		&NetworkCollector{},
 	}
+	collectors = append(collectors, NewGPUCollector(config.GPU))
 
 	// 进程监控收集器
 	processCollector := NewProcessCollector(50) // 最多收集50个进程
