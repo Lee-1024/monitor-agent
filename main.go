@@ -31,6 +31,7 @@ func NewAgent(hostID string, interval time.Duration, reporter *Reporter, config 
 	// 进程监控收集器
 	processCollector := NewProcessCollector(50) // 最多收集50个进程
 	collectors = append(collectors, processCollector)
+	collectors = append(collectors, NewDockerCollector())
 
 	var logCollector *LogCollector
 	if config.LogCollectionEnabled() {
@@ -146,6 +147,12 @@ func (a *Agent) reportCoreMetrics(metrics *MetricsData) {
 			if err := a.reporter.ReportServiceStatus(serviceData); err != nil {
 				log.Printf("Failed to report service status: %v", err)
 			}
+		}
+	}
+
+	if dockerData, ok := metrics.Metrics["docker"].(*DockerMetrics); ok {
+		if err := a.reporter.ReportDockerContainers(dockerData); err != nil {
+			log.Printf("Failed to report docker containers: %v", err)
 		}
 	}
 }

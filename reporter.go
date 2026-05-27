@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net"
 	"os"
@@ -375,6 +376,50 @@ func (r *Reporter) ReportServiceStatus(data *ServiceMetrics) error {
 	}
 
 	return err
+}
+
+func (r *Reporter) ReportDockerContainers(data *DockerMetrics) error {
+	if !r.registered {
+		return nil
+	}
+	if data == nil {
+		return nil
+	}
+
+	req := &pb.LogReportRequest{
+		HostId:    r.hostID,
+		Timestamp: time.Now().Unix(),
+		Logs:      make([]*pb.LogEntry, 0, len(data.Containers)),
+	}
+	for _, container := range data.Containers {
+		payload, err := json.Marshal(container)
+		if err != nil {
+			log.Printf("Failed to encode docker container %s: %v", container.Name, err)
+			continue
+		}
+		req.Logs = append(req.Logs, &pb.LogEntry{
+			Source:    "docker",
+			Level:     "INFO",
+			Message:   string(payload),
+			Timestamp: req.Timestamp,
+			Tags: map[string]string{
+				"container_id": container.ContainerID,
+				"name":         container.Name,
+			},
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := r.client.ReportDockerContainers(ctx, req)
+	if err != nil {
+		log.Printf("Failed to send docker container data: %v", err)
+		return err
+	}
+	if resp != nil && !resp.Success {
+		log.Printf("Server rejected docker container data: %s", resp.Message)
+	}
+	return nil
 }
 
 // Close 关闭连接
