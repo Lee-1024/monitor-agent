@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -59,7 +60,11 @@ func (r *HTTPReporter) post(ctx context.Context, path string, payload interface{
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("http reporter got status %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if len(respBody) > 0 {
+			return fmt.Errorf("http reporter got status %d from %s: %s", resp.StatusCode, req.URL.String(), strings.TrimSpace(string(respBody)))
+		}
+		return fmt.Errorf("http reporter got status %d from %s", resp.StatusCode, req.URL.String())
 	}
 	return nil
 }
