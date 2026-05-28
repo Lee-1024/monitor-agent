@@ -21,7 +21,17 @@ type AgentConfig struct {
 	Scripts         []ScriptConfig      `yaml:"scripts"`       // 脚本配置列表
 	Services        []string            `yaml:"services"`      // 要检测的服务列表（兼容旧格式）
 	ServicePorts    []ServicePortConfig `yaml:"service_ports"` // 服务端口配置（新格式，支持端口检查）
+	GRPC            GRPCConfig          `yaml:"grpc"`          // gRPC连接与请求超时配置
+	Fallback        FallbackConfig      `yaml:"fallback"`      // gRPC失败后的HTTP兜底和本地缓存配置
 	GPU             GPUConfig           `yaml:"gpu"`
+}
+
+type GRPCConfig struct {
+	ConnectTimeout   int `yaml:"connect_timeout"`   // 建立gRPC连接超时时间（秒）
+	RegisterTimeout  int `yaml:"register_timeout"`  // 注册Agent超时时间（秒）
+	ReportTimeout    int `yaml:"report_timeout"`    // 指标上报超时时间（秒）
+	HeartbeatTimeout int `yaml:"heartbeat_timeout"` // 心跳超时时间（秒）
+	RequestTimeout   int `yaml:"request_timeout"`   // 其他请求超时时间（秒）
 }
 
 type GPUConfig struct {
@@ -32,6 +42,14 @@ type GPUConfig struct {
 	Args          []string          `yaml:"args"`
 	Timeout       int               `yaml:"timeout"`
 	FieldMappings map[string]string `yaml:"field_mappings"`
+}
+
+type FallbackConfig struct {
+	HTTPEnabled   bool   `yaml:"http_enabled"`
+	HTTPBaseURL   string `yaml:"http_base_url"`
+	CacheEnabled  bool   `yaml:"cache_enabled"`
+	CacheDir      string `yaml:"cache_dir"`
+	MaxCacheFiles int    `yaml:"max_cache_files"`
 }
 
 // ServicePortConfig 服务端口配置（支持端口检查，类似 telnet）
@@ -61,6 +79,19 @@ func LoadAgentConfigFromPath(configFile string) *AgentConfig {
 		CollectInterval: 10,
 		ManualIP:        "",
 		Debug:           false,
+		GRPC: GRPCConfig{
+			ConnectTimeout:   5,
+			RegisterTimeout:  5,
+			ReportTimeout:    5,
+			HeartbeatTimeout: 3,
+			RequestTimeout:   10,
+		},
+		Fallback: FallbackConfig{
+			HTTPEnabled:   false,
+			CacheEnabled:  true,
+			CacheDir:      "./agent-cache",
+			MaxCacheFiles: 1000,
+		},
 		GPU: GPUConfig{
 			Enabled:  true,
 			Provider: "auto",

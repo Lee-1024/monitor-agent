@@ -20,6 +20,23 @@ manual_ip: "192.168.21.14"
 # 调试模式（true: 输出到控制台, false: 通过gRPC上报）
 debug: false
 
+# gRPC连接与请求超时（秒）
+# 网络抖动、跨机房或后端注册偶发慢时可适当调大 connect/register。
+grpc:
+  connect_timeout: 5
+  register_timeout: 5
+  report_timeout: 5
+  heartbeat_timeout: 3
+  request_timeout: 10
+
+# gRPC不可用时的HTTP兜底和本地缓存
+fallback:
+  http_enabled: true
+  http_base_url: "http://localhost:8080"
+  cache_enabled: true
+  cache_dir: "./agent-cache"
+  max_cache_files: 1000
+
 # ============================================
 # 日志收集配置
 # ============================================

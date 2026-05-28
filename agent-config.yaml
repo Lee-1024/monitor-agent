@@ -5,6 +5,20 @@ collect_interval: 10
 manual_ip: "10.54.56.88"  # 手动指定IP
 debug: false
 
+grpc:
+  connect_timeout: 20
+  register_timeout: 20
+  report_timeout: 10
+  heartbeat_timeout: 5
+  request_timeout: 20
+
+fallback:
+  http_enabled: true
+  http_base_url: "http://10.54.56.88:8080"
+  cache_enabled: true
+  cache_dir: "./agent-cache"
+  max_cache_files: 1000
+
 #服务端口监控
 service_ports:
   - name: "nginx"

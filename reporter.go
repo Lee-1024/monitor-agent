@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -26,6 +27,9 @@ type Reporter struct {
 	hostID     string
 	config     *AgentConfig
 	registered bool
+	http       *HTTPReporter
+	cache      *MetricCache
+	grpcReady  bool
 }
 
 // NewReporter 创建上报器
@@ -34,26 +38,37 @@ func NewReporter(serverAddr, hostID string) (*Reporter, error) {
 }
 
 func NewReporterWithConfig(serverAddr, hostID string, config *AgentConfig) (*Reporter, error) {
-	// 建立gRPC连接
-	conn, err := grpc.Dial(serverAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-		grpc.WithTimeout(5*time.Second),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	client := pb.NewCollectorClient(conn)
-
 	reporter := &Reporter{
-		client:     client,
-		conn:       conn,
 		serverAddr: serverAddr,
 		hostID:     hostID,
 		config:     config,
 		registered: false,
 	}
+	reporter.initFallback()
+
+	connectTimeout := timeoutSeconds(config.GRPC.ConnectTimeout, 5)
+	// 建立gRPC连接
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, serverAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		if reporter.http == nil {
+			return nil, fmt.Errorf("connect to gRPC server %s timeout after %s: %w", serverAddr, connectTimeout, err)
+		}
+		log.Printf("gRPC reporter unavailable, switching to HTTP fallback: %v", err)
+		if err := reporter.register(); err != nil {
+			return nil, err
+		}
+		return reporter, nil
+	}
+
+	reporter.client = pb.NewCollectorClient(conn)
+	reporter.conn = conn
+	reporter.grpcReady = true
 
 	// 注册Agent
 	if err := reporter.register(); err != nil {
@@ -62,6 +77,18 @@ func NewReporterWithConfig(serverAddr, hostID string, config *AgentConfig) (*Rep
 	}
 
 	return reporter, nil
+}
+
+func (r *Reporter) initFallback() {
+	if r.config == nil {
+		return
+	}
+	if r.config.Fallback.HTTPEnabled && r.config.Fallback.HTTPBaseURL != "" {
+		r.http = NewHTTPReporter(r.config.Fallback.HTTPBaseURL, timeoutSeconds(r.config.GRPC.RequestTimeout, 10))
+	}
+	if r.config.Fallback.CacheEnabled {
+		r.cache = NewMetricCache(r.config.Fallback.CacheDir, r.config.Fallback.MaxCacheFiles)
+	}
 }
 
 // register 注册Agent
@@ -82,10 +109,25 @@ func (r *Reporter) register() error {
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSeconds(r.config.GRPC.RegisterTimeout, 5))
 	defer cancel()
 
-	resp, err := r.client.RegisterAgent(ctx, req)
+	var err error
+	var resp *pb.RegisterResponse
+	if r.grpcReady && r.client != nil {
+		resp, err = r.client.RegisterAgent(ctx, req)
+		if err != nil {
+			log.Printf("Failed to register via gRPC: %v", err)
+		}
+	}
+	if (resp == nil || err != nil) && r.http != nil {
+		err = r.http.Register(ctx, req)
+		if err == nil {
+			r.registered = true
+			log.Printf("Agent registered successfully via HTTP fallback")
+			return nil
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -107,6 +149,31 @@ func (r *Reporter) Report(data *MetricsData) error {
 	}
 
 	// 转换为protobuf格式
+	req := r.metricsRequest(data)
+
+	if r.cache != nil {
+		if flushed, err := r.cache.Flush(r.sendMetricsRequest); err != nil {
+			log.Printf("Failed to flush metric cache: %v", err)
+		} else if flushed > 0 {
+			log.Printf("Flushed %d cached metric reports", flushed)
+		}
+	}
+
+	if err := r.sendMetricsRequest(req); err != nil {
+		if r.cache != nil {
+			if cacheErr := r.cache.Store(req); cacheErr != nil {
+				log.Printf("Failed to cache metrics: %v", cacheErr)
+			} else {
+				log.Printf("Metrics cached locally after report failure")
+			}
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (r *Reporter) metricsRequest(data *MetricsData) *pb.MetricsRequest {
 	req := &pb.MetricsRequest{
 		HostId:    data.HostID,
 		Timestamp: data.Timestamp,
@@ -196,21 +263,32 @@ func (r *Reporter) Report(data *MetricsData) error {
 		req.Gpu = gpuMetrics
 	}
 
-	// 发送请求
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	return req
+}
+
+func (r *Reporter) sendMetricsRequest(req *pb.MetricsRequest) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSeconds(r.config.GRPC.ReportTimeout, 5))
 	defer cancel()
 
-	resp, err := r.client.ReportMetrics(ctx, req)
-	if err != nil {
-		log.Printf("Failed to report metrics: %v", err)
-		return err
+	if r.grpcReady && r.client != nil {
+		resp, err := r.client.ReportMetrics(ctx, req)
+		if err == nil {
+			if !resp.Success {
+				log.Printf("Server rejected metrics: %s", resp.Message)
+			}
+			return nil
+		}
+		log.Printf("Failed to report metrics via gRPC: %v", err)
 	}
 
-	if !resp.Success {
-		log.Printf("Server rejected metrics: %s", resp.Message)
+	if r.http != nil {
+		if err := r.http.ReportMetrics(ctx, req); err != nil {
+			return err
+		}
+		log.Printf("Metrics reported successfully via HTTP fallback")
+		return nil
 	}
-
-	return nil
+	return fmt.Errorf("no metrics reporter available")
 }
 
 // SendHeartbeat 发送心跳
@@ -224,16 +302,22 @@ func (r *Reporter) SendHeartbeat() error {
 		Timestamp: time.Now().Unix(),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSeconds(r.config.GRPC.HeartbeatTimeout, 3))
 	defer cancel()
 
-	_, err := r.client.Heartbeat(ctx, req)
-	if err != nil {
-		log.Printf("Heartbeat failed: %v", err)
-		return err
+	if r.grpcReady && r.client != nil {
+		_, err := r.client.Heartbeat(ctx, req)
+		if err == nil {
+			return nil
+		}
+		log.Printf("Heartbeat via gRPC failed: %v", err)
 	}
 
-	return nil
+	if r.http != nil {
+		return r.http.Heartbeat(ctx, req)
+	}
+
+	return fmt.Errorf("no heartbeat reporter available")
 }
 
 // ReportProcesses 上报进程监控数据
@@ -270,7 +354,7 @@ func (r *Reporter) ReportProcesses(data *ProcessMetrics) error {
 
 	log.Printf("Sending %d processes to server", len(req.Processes))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSeconds(r.config.GRPC.RequestTimeout, 10))
 	defer cancel()
 
 	resp, err := r.client.ReportProcesses(ctx, req)
@@ -310,7 +394,7 @@ func (r *Reporter) ReportLogs(data *LogMetrics) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSeconds(r.config.GRPC.RequestTimeout, 10))
 	defer cancel()
 
 	_, err := r.client.ReportLogs(ctx, req)
@@ -336,7 +420,7 @@ func (r *Reporter) ReportScriptResults(data *ScriptMetrics) error {
 			DurationMs: result.Duration,
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeoutSeconds(r.config.GRPC.RequestTimeout, 10))
 		_, err := r.client.ReportScriptResult(ctx, req)
 		cancel()
 
@@ -384,7 +468,7 @@ func (r *Reporter) ReportServiceStatus(data *ServiceMetrics) error {
 
 	log.Printf("Sending %d service statuses to server", len(req.Services))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSeconds(r.config.GRPC.RequestTimeout, 10))
 	defer cancel()
 
 	resp, err := r.client.ReportServiceStatus(ctx, req)
@@ -433,7 +517,7 @@ func (r *Reporter) ReportDockerContainers(data *DockerMetrics) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSeconds(r.config.GRPC.RequestTimeout, 10))
 	defer cancel()
 	resp, err := r.client.ReportDockerContainers(ctx, req)
 	if err != nil {
@@ -493,4 +577,11 @@ func (r *Reporter) getIPAddress() string {
 	ip := getLocalIP()
 	log.Printf("Auto-detected IP: %s", ip)
 	return ip
+}
+
+func timeoutSeconds(seconds int, fallback int) time.Duration {
+	if seconds <= 0 {
+		seconds = fallback
+	}
+	return time.Duration(seconds) * time.Second
 }

@@ -16,6 +16,36 @@ manual_ip: "192.168.21.14"       # 手动指定IP（可选）
 debug: false                      # 调试模式
 ```
 
+### gRPC超时配置
+
+```yaml
+grpc:
+  connect_timeout: 20    # 建立gRPC连接超时时间，默认5秒
+  register_timeout: 20   # Agent注册超时时间，默认5秒
+  report_timeout: 10     # 指标上报超时时间，默认5秒
+  heartbeat_timeout: 5   # 心跳超时时间，默认3秒
+  request_timeout: 20    # 进程、日志、脚本、服务等其他上报请求超时，默认10秒
+```
+
+如果只有部分机器出现 `Failed to create reporter: context deadline exceeded`，通常是这些机器到后端的网络路径或后端注册处理偶发变慢。可以先把 `connect_timeout` 和 `register_timeout` 调到 `20` 或 `30` 秒缓解，同时继续排查路由、防火墙、代理和后端数据库响应时间。
+
+### HTTP兜底与本地缓存
+
+```yaml
+fallback:
+  http_enabled: true
+  http_base_url: "http://192.168.1.100:8080"
+  cache_enabled: true
+  cache_dir: "./agent-cache"
+  max_cache_files: 1000
+```
+
+- `http_enabled`: gRPC连接或上报失败时，是否改用后端HTTP接口上报。
+- `http_base_url`: 后端HTTP API地址，只填写协议、主机和端口，不要带 `/api/v1`。
+- `cache_enabled`: HTTP兜底也失败时，是否把指标写入本地缓存。
+- `cache_dir`: 本地缓存目录。
+- `max_cache_files`: 最大缓存文件数，超过后删除最旧缓存，避免磁盘占满。
+
 ### 日志收集配置
 
 #### 配置格式
